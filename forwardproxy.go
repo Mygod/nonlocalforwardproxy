@@ -173,7 +173,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			}); err != nil {
 				return err
 			}
-			return operr
+			return os.NewSyscallError("setsockopt", operr)
 		}
 		d.LocalAddr = *bind
 		return d.DialContext(ctx, network, address)

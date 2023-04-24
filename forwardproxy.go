@@ -176,8 +176,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			return os.NewSyscallError("setsockopt", operr)
 		}
 		d.LocalAddr = *bind
-		d.FallbackDelay = -1
-		return d.DialContext(ctx, network, address)
+		return d.DialContext(ctx, (*bind).Network(), address)
 	}
 
 	if h.Upstream != "" {
@@ -402,7 +401,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if r.URL.Port() == "" {
 			r.URL.Host = net.JoinHostPort(r.URL.Host, "80")
 		}
-		upsConn, err := h.dialContext(ctx, "tcp", r.URL.Host, &bind) // TODO: support dual stack
+		upsConn, err := h.dialContext(ctx, "tcp", r.URL.Host, &bind)
 		if err != nil {
 			return caddyhttp.Error(http.StatusBadGateway,
 				fmt.Errorf("failed to dial upstream: %v", err))

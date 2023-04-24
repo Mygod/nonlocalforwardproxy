@@ -1,6 +1,6 @@
 module github.com/caddyserver/forwardproxy
 
-go 1.14
+go 1.20
 
 require (
 	github.com/caddyserver/caddy/v2 v2.4.0-beta.1

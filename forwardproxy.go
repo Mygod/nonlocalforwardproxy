@@ -162,7 +162,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		KeepAlive: 30 * time.Second,
 	}
 	h.dialContext = func(ctx context.Context, network string, address string, bind *net.Addr) (net.Conn, error) {
-		if bind != nil {
+		if bind == nil {
 			return dialer.DialContext(ctx, network, address)
 		}
 		d := *dialer // create a shallow copy
@@ -176,7 +176,6 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			return operr
 		}
 		d.LocalAddr = *bind
-		_, _ = fmt.Fprintf(os.Stderr, "testme %v\n", bind)
 		return d.DialContext(ctx, network, address)
 	}
 
@@ -289,7 +288,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 
 	clientBind := r.Header.Get("Proxy-Nonlocal-Source")
 	var bind net.Addr
-	if bind, err = net.ResolveTCPAddr("tcp", clientBind); err == nil {
+	if bind, err = net.ResolveTCPAddr("tcp", clientBind); err != nil {
 		if ip, _ := net.ResolveIPAddr("ip", clientBind); ip != nil {
 			bind = &net.TCPAddr{IP: ip.IP}
 		}

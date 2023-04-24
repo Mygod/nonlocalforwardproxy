@@ -148,7 +148,7 @@ Don't forget to add `http.forwardproxy` plugin.
 
 0. Install [xcaddy](https://github.com/caddyserver/xcaddy)
 1. `xcaddy build latest --with github.com/Mygod/nonlocalforwardproxy` (for dev, add `=/path/to/project/root` to the end)
-2. Add `Proxy-Nonlocal-Source: <desired source IPv6 address>` to your proxy request header
+2. Add `Proxy-Nonlocal-Source: <desired source IP address>` to your proxy request header or add `bind <desired source IP address>` to your config block
 
 ## Client Configuration
 

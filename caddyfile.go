@@ -1,15 +1,14 @@
 package forwardproxy
 
 import (
-	"log"
-	"net"
-	"strconv"
-	"strings"
-
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"log"
+	"net"
+	"strconv"
+	"strings"
 )
 
 func init() {
@@ -175,13 +174,19 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				h.ACL = append(h.ACL, ar)
 			}
 		case "bind":
-			var x net.Addr
-			if bind, _ := net.ResolveTCPAddr("tcp", args[0]); bind != nil {
-				x = bind
-				h.DefaultBind = &x
-			} else if ip, err := net.ResolveIPAddr("ip", args[0]); ip != nil {
-				x = &net.TCPAddr{IP: ip.IP}
-				h.DefaultBind = &x
+			if _, addrnet, err := net.ParseCIDR(args[0]); err == nil {
+				ones, bits := addrnet.Mask.Size()
+				if bits == 0 || ones&7 != 0 {
+					// TODO: support more subnet sizes
+					return d.Err("unsupported subnet to bind to: size must be a multiple of 8")
+				}
+				h.DefaultBind = addrnet
+			} else if ip := net.ParseIP(args[0]); ip != nil {
+				mask := make(net.IPMask, len(ip))
+				for i := range mask {
+					mask[i] = 0xff
+				}
+				h.DefaultBind = &net.IPNet{IP: ip, Mask: mask}
 			} else {
 				return err
 			}

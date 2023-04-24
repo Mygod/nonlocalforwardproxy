@@ -2,6 +2,7 @@ package forwardproxy
 
 import (
 	"log"
+	"net"
 	"strconv"
 	"strings"
 
@@ -172,6 +173,17 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 				ar := ACLRule{Subjects: ruleSubjects, Allow: aclAllow}
 				h.ACL = append(h.ACL, ar)
+			}
+		case "bind":
+			var x net.Addr
+			if bind, _ := net.ResolveTCPAddr("tcp", args[0]); bind != nil {
+				x = bind
+				h.DefaultBind = &x
+			} else if ip, err := net.ResolveIPAddr("ip", args[0]); ip != nil {
+				x = &net.TCPAddr{IP: ip.IP}
+				h.DefaultBind = &x
+			} else {
+				return err
 			}
 		default:
 			return d.ArgErr()

@@ -83,6 +83,9 @@ type Handler struct {
 	// Ports to be allowed to connect to (if non-empty).
 	AllowedPorts []int `json:"allowed_ports,omitempty"`
 
+	// Default address to send requests from if one is not specified from the proxy request
+	DefaultBind *net.Addr `json:"bind,omitempty"`
+
 	//httpTransport *http.Transport
 
 	// overridden dialContext allows us to redirect requests to upstream proxy
@@ -163,7 +166,10 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	}
 	h.dialContext = func(ctx context.Context, network string, address string, bind *net.Addr) (net.Conn, error) {
 		if bind == nil {
-			return dialer.DialContext(ctx, network, address)
+			if h.DefaultBind == nil {
+				return dialer.DialContext(ctx, network, address)
+			}
+			bind = h.DefaultBind
 		}
 		d := *dialer // create a shallow copy
 		d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {

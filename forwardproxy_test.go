@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caddyserver/forwardproxy/httpclient"
+	"github.com/Mygod/nonlocalforwardproxy/httpclient"
 	"golang.org/x/net/http2"
 )
 

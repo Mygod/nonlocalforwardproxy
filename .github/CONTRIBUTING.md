@@ -49,7 +49,7 @@ Please be kind. :smile: Remember that Caddy comes at no cost to you, and you're 
 
 ### Suggesting features
 
-First, [search to see if your feature has already been requested](https://github.com/caddyserver/forwardproxy/issues). If it has, you can add a :+1: reaction to vote for it. If your feature idea is new, open an issue to request the feature. You don't have to follow the bug template for feature requests. Please describe your idea thoroughly so that we know how to implement it! Really vague requests may not be helpful or actionable and without clarification will have to be closed.
+First, [search to see if your feature has already been requested](https://github.com/Mygod/nonlocalforwardproxy/issues). If it has, you can add a :+1: reaction to vote for it. If your feature idea is new, open an issue to request the feature. You don't have to follow the bug template for feature requests. Please describe your idea thoroughly so that we know how to implement it! Really vague requests may not be helpful or actionable and without clarification will have to be closed.
 
 While we really do value your requests and implement many of them, not all features are a good fit for Caddy or forwardproxy. If a feature is not in the best interest of the Caddy project or its users in general, we may politely decline to implement it.
 

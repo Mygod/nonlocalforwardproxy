@@ -1,4 +1,4 @@
-module github.com/caddyserver/forwardproxy
+module github.com/Mygod/nonlocalforwardproxy
 
 go 1.20
 

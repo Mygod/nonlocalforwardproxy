@@ -24,8 +24,7 @@ Here's an example of all properties in use (note that the syntax is subject to c
 :443, example.com
 route {
   forward_proxy {
-    basicauth user1 password1
-    basicauth user2 password2
+    basic_auth user password
     ports     80 443
     hide_ip
     hide_via

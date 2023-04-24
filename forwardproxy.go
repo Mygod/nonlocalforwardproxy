@@ -86,7 +86,7 @@ type Handler struct {
 	//httpTransport *http.Transport
 
 	// overridden dialContext allows us to redirect requests to upstream proxy
-	dialContext func(ctx context.Context, network, address string, bind net.IP) (net.Conn, error)
+	dialContext func(ctx context.Context, network, address string, bind *net.Addr) (net.Conn, error)
 	upstream    *url.URL // address of upstream proxy
 
 	aclRules []aclRule
@@ -158,36 +158,26 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	}
 
 	dialer := &net.Dialer{
-		Timeout:       time.Duration(h.DialTimeout),
-		KeepAlive:     30 * time.Second,
-		FallbackDelay: -1,
+		Timeout:   time.Duration(h.DialTimeout),
+		KeepAlive: 30 * time.Second,
 	}
-	h.dialContext = func(ctx context.Context, network string, address string, bind net.IP) (net.Conn, error) {
-		conn, err := dialer.DialContext(ctx, network, address)
-		if err != nil || len(bind) != 4 && len(bind) != 16 {
-			return conn, err
+	h.dialContext = func(ctx context.Context, network string, address string, bind *net.Addr) (net.Conn, error) {
+		if bind != nil {
+			return dialer.DialContext(ctx, network, address)
 		}
-		tcpConn, ok := conn.(*net.TCPConn)
-		if !ok {
-			err = errors.New("conn is not tcp")
-			return nil, err
+		d := *dialer // create a shallow copy
+		d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			var operr error
+			if err := c.Control(func(fd uintptr) {
+				operr = syscall.SetsockoptInt(int(fd), syscall.SOL_IP, syscall.IP_FREEBIND, 1)
+			}); err != nil {
+				return err
+			}
+			return operr
 		}
-		f, err := tcpConn.File()
-		if err != nil {
-			return nil, err
-		}
-		if err = syscall.SetsockoptInt(int(f.Fd()), syscall.SOL_IP, syscall.IP_FREEBIND, 1); err != nil {
-			return nil, err
-		}
-		if len(bind) == 4 {
-			err = syscall.Bind(int(f.Fd()), &syscall.SockaddrInet4{Addr: ([4]byte)(bind)})
-		} else {
-			err = syscall.Bind(int(f.Fd()), &syscall.SockaddrInet6{Addr: ([16]byte)(bind)})
-		}
-		if err != nil {
-			return nil, err
-		}
-		return conn, nil
+		d.LocalAddr = *bind
+		_, _ = fmt.Fprintf(os.Stderr, "testme %v\n", bind)
+		return d.DialContext(ctx, network, address)
 	}
 
 	if h.Upstream != "" {
@@ -234,12 +224,12 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 
 		if ctxDialer, ok := upstreamDialer.(dialContexter); ok {
 			// upstreamDialer has DialContext - use it
-			h.dialContext = func(ctx context.Context, network string, address string, bind net.IP) (net.Conn, error) {
+			h.dialContext = func(ctx context.Context, network string, address string, bind *net.Addr) (net.Conn, error) {
 				return ctxDialer.DialContext(ctx, network, address)
 			}
 		} else {
 			// upstreamDialer does not have DialContext - ignore the context :(
-			h.dialContext = func(ctx context.Context, network string, address string, bind net.IP) (net.Conn, error) {
+			h.dialContext = func(ctx context.Context, network string, address string, bind *net.Addr) (net.Conn, error) {
 				return upstreamDialer.Dial(network, address)
 			}
 		}
@@ -297,9 +287,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		ctx = context.WithValue(ctx, httpclient.ContextKeyHeader{}, ctxHeader)
 	}
 
-	var bind net.IP
-	if ip, _ := net.ResolveIPAddr("ip", r.Header.Get("Proxy-Nonlocal-Source")); ip != nil {
-		bind = ip.IP
+	clientBind := r.Header.Get("Proxy-Nonlocal-Source")
+	var bind net.Addr
+	if bind, err = net.ResolveTCPAddr("tcp", clientBind); err == nil {
+		if ip, _ := net.ResolveIPAddr("ip", clientBind); ip != nil {
+			bind = &net.TCPAddr{IP: ip.IP}
+		}
 	}
 
 	if r.Method == http.MethodConnect {
@@ -314,7 +307,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if hostPort == "" {
 			hostPort = r.Host
 		}
-		targetConn, err := h.dialContextCheckACL(ctx, "tcp", hostPort, bind)
+		targetConn, err := h.dialContextCheckACL(ctx, "tcp", hostPort, &bind)
 		if err != nil {
 			return err
 		}
@@ -394,7 +387,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			DisableKeepAlives:   true,
 			TLSHandshakeTimeout: 10 * time.Second,
 			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-				return h.dialContextCheckACL(ctx, network, address, bind)
+				return h.dialContextCheckACL(ctx, network, address, &bind)
 			},
 		}).RoundTrip(r)
 	} else {
@@ -409,7 +402,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if r.URL.Port() == "" {
 			r.URL.Host = net.JoinHostPort(r.URL.Host, "80")
 		}
-		upsConn, err := h.dialContext(ctx, "tcp6", r.URL.Host, bind) // TODO: support tcp4 and dual stack
+		upsConn, err := h.dialContext(ctx, "tcp6", r.URL.Host, &bind) // TODO: support tcp4 and dual stack
 		if err != nil {
 			return caddyhttp.Error(http.StatusBadGateway,
 				fmt.Errorf("failed to dial upstream: %v", err))
@@ -472,7 +465,7 @@ func (h Handler) servePacFile(w http.ResponseWriter, r *http.Request) error {
 }
 
 // dialContextCheckACL enforces Access Control List and calls fp.DialContext
-func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort string, bind net.IP) (net.Conn, error) {
+func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort string, bind *net.Addr) (net.Conn, error) {
 	var conn net.Conn
 
 	if network != "tcp" && network != "tcp4" && network != "tcp6" {
@@ -522,6 +515,8 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 		conn, err = h.dialContext(ctx, network, net.JoinHostPort(ip.String(), port), bind)
 		if err == nil {
 			return conn, nil
+		} else {
+			_, _ = fmt.Fprintf(os.Stderr, "dialContext failed %v\n", err)
 		}
 	}
 

@@ -174,6 +174,9 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				h.ACL = append(h.ACL, ar)
 			}
 		case "bind":
+			if len(args) != 1 {
+				return d.ArgErr()
+			}
 			if _, addrnet, err := net.ParseCIDR(args[0]); err == nil {
 				ones, bits := addrnet.Mask.Size()
 				if bits == 0 || ones&7 != 0 {

@@ -182,11 +182,8 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 				h.DefaultBind = addrnet
 			} else if ip := net.ParseIP(args[0]); ip != nil {
-				mask := make(net.IPMask, len(ip))
-				for i := range mask {
-					mask[i] = 0xff
-				}
-				h.DefaultBind = &net.IPNet{IP: ip, Mask: mask}
+				bits := len(ip) << 3
+				h.DefaultBind = &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
 			} else {
 				return err
 			}

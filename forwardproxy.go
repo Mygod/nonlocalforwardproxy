@@ -511,6 +511,7 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 
 	// This is net.Dial's default behavior: if the host resolves to multiple IP addresses,
 	// Dial will try each IP address in order until one succeeds
+	err = nil
 	for _, ip := range IPs {
 		if !h.hostIsAllowed(host, ip) {
 			continue
@@ -519,9 +520,10 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 		conn, err = h.dialContext(ctx, network, net.JoinHostPort(ip.String(), port), bind)
 		if err == nil {
 			return conn, nil
-		} else {
-			_, _ = fmt.Fprintf(os.Stderr, "dialContext failed %v\n", err)
 		}
+	}
+	if err != nil {
+		return nil, caddyhttp.Error(http.StatusBadGateway, fmt.Errorf("dialContext: %v", err))
 	}
 
 	return nil, caddyhttp.Error(http.StatusForbidden, fmt.Errorf("no allowed IP addresses for %s", host))

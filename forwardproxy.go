@@ -86,6 +86,8 @@ type Handler struct {
 	// Default address to send requests from if one is not specified from the proxy request
 	DefaultBind *net.IPNet `json:"bind,omitempty"`
 
+	HostOverride string `json:"host_override,omitempty"`
+
 	//httpTransport *http.Transport
 
 	// overridden dialContext allows us to redirect requests to upstream proxy
@@ -501,7 +503,11 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	}
 
 	// in case IP was provided, net.LookupIP will simply return it
-	IPs, err := net.LookupIP(host)
+	lookupHost := h.HostOverride
+	if len(lookupHost) == 0 {
+		lookupHost = host
+	}
+	IPs, err := net.DefaultResolver.LookupIPAddr(ctx, lookupHost)
 	if err != nil {
 		// return nil, &proxyError{S: fmt.Sprintf("Lookup of %s failed: %v", host, err),
 		// Code: http.StatusBadGateway}
@@ -513,7 +519,7 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	// Dial will try each IP address in order until one succeeds
 	err = nil
 	for _, ip := range IPs {
-		if !h.hostIsAllowed(host, ip) {
+		if !h.hostIsAllowed(host, ip.IP) {
 			continue
 		}
 

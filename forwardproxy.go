@@ -36,6 +36,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Mygod/nonlocalforwardproxy/httpclient"
@@ -645,6 +646,18 @@ func serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn
 	return dualStream(ctx, targetConn, clientConn, clientConn)
 }
 
+type quietReader struct {
+	reader io.ReadCloser
+}
+
+func (r quietReader) Read(p []byte) (n int, err error) {
+	n, err = r.reader.Read(p)
+	if errors.Is(err, syscall.ECONNRESET) {
+		err = io.EOF
+	}
+	return
+}
+
 // Copies data target->clientReader and clientWriter->target, and flushes as needed
 // Returns when clientWriter-> target stream is done.
 // Caddy should finish writing target -> clientReader.
@@ -662,7 +675,7 @@ func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser
 		return _err
 	}
 	errs.Go(func() error {
-		return stream(target, clientReader)
+		return stream(target, quietReader{clientReader})
 	})
 	errs.Go(func() error {
 		return stream(clientWriter, target)
@@ -687,9 +700,13 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte) (written int64, er
 		if nr > 0 {
 			nw, ew := dst.Write(buf[0:nr])
 			flusher.Flush()
-			if nw > 0 {
-				written += int64(nw)
+			if nw < 0 || nr < nw {
+				nw = 0
+				if ew == nil {
+					ew = errors.New("invalid write result")
+				}
 			}
+			written += int64(nw)
 			if ew != nil {
 				err = ew
 				break

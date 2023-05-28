@@ -25,6 +25,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -322,7 +323,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 
 		switch r.ProtoMajor {
 		case 1: // http1: hijack the whole flow
-			return serveHijack(w, targetConn)
+			return serveHijack(ctx, w, targetConn)
 		case 2: // http2: keep reading from "request" and writing into same response
 			fallthrough
 		case 3:
@@ -334,7 +335,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 			w.WriteHeader(http.StatusOK)
 			wFlusher.Flush()
-			return dualStream(targetConn, r.Body, w)
+			return dualStream(ctx, targetConn, r.Body, w)
 		}
 
 		panic("There was a check for http version, yet it's incorrect")
@@ -596,7 +597,7 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
-func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
+func serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn) error {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		return caddyhttp.Error(http.StatusInternalServerError,
@@ -641,13 +642,14 @@ func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
 
-	return dualStream(targetConn, clientConn, clientConn)
+	return dualStream(ctx, targetConn, clientConn, clientConn)
 }
 
 // Copies data target->clientReader and clientWriter->target, and flushes as needed
 // Returns when clientWriter-> target stream is done.
 // Caddy should finish writing target -> clientReader.
-func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer) error {
+func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer) error {
+	errs, ctx := errgroup.WithContext(ctx)
 	stream := func(w io.Writer, r io.Reader) error {
 		// copy bytes from r to w
 		buf := bufferPool.Get().([]byte)
@@ -659,8 +661,13 @@ func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Wri
 		}
 		return _err
 	}
-	go stream(target, clientReader)
-	return stream(clientWriter, target)
+	errs.Go(func() error {
+		return stream(target, clientReader)
+	})
+	errs.Go(func() error {
+		return stream(clientWriter, target)
+	})
+	return errs.Wait()
 }
 
 type closeWriter interface {

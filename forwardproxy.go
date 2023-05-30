@@ -652,7 +652,8 @@ type quietReader struct {
 
 func (r quietReader) Read(p []byte) (n int, err error) {
 	n, err = r.reader.Read(p)
-	if errors.Is(err, syscall.ECONNRESET) {
+	if err != nil && (errors.Is(err, syscall.ECONNRESET) ||
+		strings.HasSuffix(err.Error(), "use of closed network connection")) {
 		err = io.EOF
 	}
 	return

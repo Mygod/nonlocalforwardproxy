@@ -2,14 +2,15 @@ package forwardproxy
 
 import (
 	"encoding/base64"
-	"github.com/caddyserver/caddy/v2"
+	"log"
+	"strconv"
+	"strings"
+
+	caddy "github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"log"
 	"net"
-	"strconv"
-	"strings"
 )
 
 func init() {
@@ -147,7 +148,7 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				aclAllow := false
 				switch aclDirective {
 				case "allow":
-					ruleSubjects = args[:]
+					ruleSubjects = args
 					aclAllow = true
 				case "allow_file":
 					if len(args) != 1 {
@@ -159,7 +160,7 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					}
 					aclAllow = true
 				case "deny":
-					ruleSubjects = args[:]
+					ruleSubjects = args
 				case "deny_file":
 					if len(args) != 1 {
 						return d.Err("denyfile accepts a single filename argument")

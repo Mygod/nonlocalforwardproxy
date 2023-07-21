@@ -682,7 +682,7 @@ func (r quietReader) Read(p []byte) (n int, err error) {
 // Returns when clientWriter-> target stream is done.
 // Caddy should finish writing target -> clientReader.
 func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer) error {
-	errs, ctx := errgroup.WithContext(ctx)
+	errs, _ := errgroup.WithContext(ctx)
 	stream := func(w io.Writer, r io.Reader) error {
 		// copy bytes from r to w
 		bufPtr := bufferPool.Get().(*[]byte)

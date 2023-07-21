@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
@@ -27,7 +28,6 @@ import (
 	"fmt"
 	"golang.org/x/sync/errgroup"
 	"io"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -96,7 +96,6 @@ type Handler struct {
 	// overridden dialContext allows us to redirect requests to upstream proxy
 	dialContext func(ctx context.Context, network, address string, bind net.Addr) (net.Conn, error)
 	upstream    *url.URL // address of upstream proxy
-	randSource  *rand.Rand
 
 	aclRules []aclRule
 
@@ -147,10 +146,6 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	}
 	h.aclRules = append(h.aclRules, &aclAllRule{allow: true})
 
-	if h.DefaultBind != nil {
-		h.randSource = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
-	}
-
 	if h.ProbeResistance != nil {
 		if !h.AuthRequired {
 			return fmt.Errorf("probe resistance requires authentication")
@@ -169,7 +164,10 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			if h.DefaultBind != nil {
 				ip := h.DefaultBind.IP
 				ones, _ := h.DefaultBind.Mask.Size()
-				h.randSource.Read(ip[ones>>3:])
+				_, err := rand.Read(ip[ones>>3:])
+				if err != nil {
+					return nil, err
+				}
 				bind = &net.TCPAddr{IP: ip}
 			}
 			if bind == nil {

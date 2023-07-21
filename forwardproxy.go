@@ -91,7 +91,7 @@ type Handler struct {
 
 	HostOverride string `json:"host_override,omitempty"`
 
-	//httpTransport *http.Transport
+	// httpTransport *http.Transport
 
 	// overridden dialContext allows us to redirect requests to upstream proxy
 	dialContext func(ctx context.Context, network, address string, bind net.Addr) (net.Conn, error)
@@ -428,7 +428,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		defer response.Body.Close()
 	}
 	if err != nil {
-		//fmt.Printf("%v", err)
+		// fmt.Printf("%v", err)
 		if _, ok := err.(caddyhttp.HandlerError); ok {
 			return err
 		}

@@ -692,9 +692,9 @@ func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser
 		bufferPool.Put(bufPtr)
 
 		if cw, ok := w.(closeWriter); ok {
-			cw.CloseWrite()
+			_ = cw.CloseWrite()
 		} else if closer, ok := w.(io.Closer); ok {
-			closer.Close()
+			_ = closer.Close()
 		}
 		return _err
 	}

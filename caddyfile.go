@@ -194,10 +194,13 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				return err
 			}
 		case "host_override":
-			if len(args) != 1 {
+			if len(args) != 2 {
 				return d.ArgErr()
 			}
-			h.HostOverride = args[0]
+			if h.HostOverride == nil {
+				h.HostOverride = make(map[string]string)
+			}
+			h.HostOverride[strings.ToLower(args[0])] = args[1]
 		default:
 			return d.ArgErr()
 		}

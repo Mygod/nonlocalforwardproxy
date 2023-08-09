@@ -89,7 +89,7 @@ type Handler struct {
 	// Default address to send requests from if one is not specified from the proxy request
 	DefaultBind *net.IPNet `json:"bind,omitempty"`
 
-	HostOverride string `json:"host_override,omitempty"`
+	HostOverride map[string]string `json:"host_override,omitempty"`
 
 	// httpTransport *http.Transport
 
@@ -522,9 +522,12 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	}
 
 	// in case IP was provided, net.LookupIP will simply return it
-	lookupHost := h.HostOverride
-	if len(lookupHost) == 0 {
-		lookupHost = host
+
+	lookupHost := host
+	if h.HostOverride != nil {
+		if override, ok := h.HostOverride[strings.ToLower(host)]; ok {
+			lookupHost = override
+		}
 	}
 	IPs, err := net.DefaultResolver.LookupIPAddr(ctx, lookupHost)
 	if err != nil {

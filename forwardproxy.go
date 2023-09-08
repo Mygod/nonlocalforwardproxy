@@ -616,6 +616,26 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 	return nil
 }
 
+type clientReaderTimeout struct {
+	conn    net.Conn
+	timeout time.Duration
+}
+
+func (r clientReaderTimeout) Close() error {
+	return r.conn.Close()
+}
+
+func (r clientReaderTimeout) Read(p []byte) (n int, err error) {
+	if err = r.conn.SetReadDeadline(time.Now().Add(r.timeout)); err != nil {
+		return 0, err
+	}
+	n, err = r.conn.Read(p)
+	if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+		err = io.EOF
+	}
+	return
+}
+
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
 func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn) error {
@@ -630,9 +650,6 @@ func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, target
 			fmt.Errorf("hijack failed: %v", err))
 	}
 	defer clientConn.Close()
-	if err = clientConn.SetReadDeadline(time.Now().Add(time.Duration(h.DialTimeout))); err != nil {
-		return err
-	}
 	// bufReader may contain unprocessed buffered data from the client.
 	if bufReader != nil {
 		// snippet borrowed from `proxy` plugin
@@ -642,7 +659,6 @@ func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, target
 				return caddyhttp.Error(http.StatusBadGateway, err)
 			}
 			_, _ = targetConn.Write(rbuf)
-
 		}
 	}
 	// Since we hijacked the connection, we lost the ability to write and flush headers via w.
@@ -668,7 +684,7 @@ func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, target
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
 
-	return dualStream(ctx, targetConn, clientConn, clientConn)
+	return dualStream(ctx, targetConn, clientReaderTimeout{clientConn, time.Duration(h.DialTimeout)}, clientConn)
 }
 
 type quietReader struct {

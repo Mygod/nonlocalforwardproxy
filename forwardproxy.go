@@ -323,7 +323,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 
 		switch r.ProtoMajor {
 		case 1: // http1: hijack the whole flow
-			return serveHijack(ctx, w, targetConn)
+			return h.serveHijack(ctx, w, targetConn)
 		case 2: // http2: keep reading from "request" and writing into same response
 			fallthrough
 		case 3:
@@ -618,7 +618,7 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
-func serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn) error {
+func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn) error {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		return caddyhttp.Error(http.StatusInternalServerError,
@@ -630,6 +630,9 @@ func serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn
 			fmt.Errorf("hijack failed: %v", err))
 	}
 	defer clientConn.Close()
+	if err = clientConn.SetReadDeadline(time.Now().Add(time.Duration(h.DialTimeout))); err != nil {
+		return err
+	}
 	// bufReader may contain unprocessed buffered data from the client.
 	if bufReader != nil {
 		// snippet borrowed from `proxy` plugin
@@ -674,7 +677,7 @@ type quietReader struct {
 
 func (r quietReader) Read(p []byte) (n int, err error) {
 	n, err = r.reader.Read(p)
-	if err != nil && (errors.Is(err, syscall.ECONNRESET) ||
+	if err != nil && (errors.Is(err, syscall.ECONNRESET) || errors.Is(err, os.ErrDeadlineExceeded) ||
 		strings.HasSuffix(err.Error(), "use of closed network connection")) {
 		err = io.EOF
 	}

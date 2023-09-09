@@ -26,6 +26,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/Mygod/nonlocalforwardproxy/httpclient"
+	caddy "github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
+	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"go.uber.org/zap"
+	"golang.org/x/net/proxy"
 	"golang.org/x/sync/errgroup"
 	"io"
 	"net"
@@ -39,13 +45,7 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Mygod/nonlocalforwardproxy/httpclient"
-	caddy "github.com/caddyserver/caddy/v2"
-	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
-	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"go.uber.org/zap"
-	"golang.org/x/net/proxy"
+	"unsafe"
 )
 
 func init() {
@@ -675,6 +675,7 @@ func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.Respo
 		rLength.SetInt(rLength.Int() + clientRead)
 	}
 	wSize := reflect.ValueOf(w).Elem().FieldByName("size")
+	wSize = reflect.NewAt(wSize.Type(), unsafe.Pointer(wSize.UnsafeAddr())).Elem()
 	if wSize.CanSet() {
 		wSize.SetInt(wSize.Int() + clientWritten)
 	}
@@ -690,7 +691,7 @@ func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser
 		written, err = io.Copy(w, r)
 		if quiet && err != nil && (errors.Is(err, syscall.ECONNRESET) ||
 			strings.HasSuffix(err.Error(), "use of closed network connection")) {
-			err = io.EOF
+			err = nil
 		}
 
 		if cw, ok := w.(closeWriter); ok {

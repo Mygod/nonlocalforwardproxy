@@ -671,6 +671,9 @@ func doHijack(w http.ResponseWriter, targetConn net.Conn) (net.Conn, error) {
 // and hijacked connection.
 func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.ResponseWriter, targetConn net.Conn) error {
 	clientConn, err := doHijack(w, targetConn)
+	if err != nil {
+		return err
+	}
 	defer clientConn.Close()
 	// unwrap the Conn so that io.Copy can work in kernel space
 	if conn, ok := reflect.ValueOf(clientConn).Elem().FieldByName("Conn").Interface().(net.Conn); ok {

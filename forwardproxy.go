@@ -617,27 +617,25 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 	return nil
 }
 
-// Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
-// and hijacked connection.
-func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.ResponseWriter, targetConn net.Conn) error {
+// Do it in a separate function so that resources/buffer arrays get cleaned up when exit
+func doHijack(w http.ResponseWriter, targetConn net.Conn) (net.Conn, error) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		return caddyhttp.Error(http.StatusInternalServerError,
+		return nil, caddyhttp.Error(http.StatusInternalServerError,
 			fmt.Errorf("ResponseWriter does not implement http.Hijacker"))
 	}
 	clientConn, bufReader, err := hijacker.Hijack()
 	if err != nil {
-		return caddyhttp.Error(http.StatusInternalServerError,
+		return nil, caddyhttp.Error(http.StatusInternalServerError,
 			fmt.Errorf("hijack failed: %v", err))
 	}
-	defer clientConn.Close()
 	// bufReader may contain unprocessed buffered data from the client.
 	if bufReader != nil {
 		// snippet borrowed from `proxy` plugin
 		if n := bufReader.Reader.Buffered(); n > 0 {
 			rbuf, err := bufReader.Reader.Peek(n)
 			if err != nil {
-				return caddyhttp.Error(http.StatusBadGateway, err)
+				return nil, caddyhttp.Error(http.StatusBadGateway, err)
 			}
 			_, _ = targetConn.Write(rbuf)
 		}
@@ -656,15 +654,24 @@ func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.Respo
 	buf := bufio.NewWriter(clientConn)
 	err = res.Write(buf)
 	if err != nil {
-		return caddyhttp.Error(http.StatusInternalServerError,
+		_ = clientConn.Close()
+		return nil, caddyhttp.Error(http.StatusInternalServerError,
 			fmt.Errorf("failed to write response: %v", err))
 	}
 	err = buf.Flush()
 	if err != nil {
-		return caddyhttp.Error(http.StatusInternalServerError,
+		_ = clientConn.Close()
+		return nil, caddyhttp.Error(http.StatusInternalServerError,
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
+	return clientConn, nil
+}
 
+// Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
+// and hijacked connection.
+func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.ResponseWriter, targetConn net.Conn) error {
+	clientConn, err := doHijack(w, targetConn)
+	defer clientConn.Close()
 	// unwrap the Conn so that io.Copy can work in kernel space
 	if conn, ok := reflect.ValueOf(clientConn).Elem().FieldByName("Conn").Interface().(net.Conn); ok {
 		clientConn = conn

@@ -33,9 +33,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -616,26 +616,6 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 	return nil
 }
 
-type clientReaderTimeout struct {
-	conn    net.Conn
-	timeout time.Duration
-}
-
-func (r clientReaderTimeout) Close() error {
-	return r.conn.Close()
-}
-
-func (r clientReaderTimeout) Read(p []byte) (n int, err error) {
-	if err = r.conn.SetReadDeadline(time.Now().Add(r.timeout)); err != nil {
-		return 0, err
-	}
-	n, err = r.conn.Read(p)
-	if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
-		err = io.EOF
-	}
-	return
-}
-
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
 func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, targetConn net.Conn) error {
@@ -684,20 +664,11 @@ func (h *Handler) serveHijack(ctx context.Context, w http.ResponseWriter, target
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
 
-	return dualStream(ctx, targetConn, clientReaderTimeout{clientConn, time.Duration(h.DialTimeout)}, clientConn)
-}
-
-type quietReader struct {
-	reader io.ReadCloser
-}
-
-func (r quietReader) Read(p []byte) (n int, err error) {
-	n, err = r.reader.Read(p)
-	if err != nil && (errors.Is(err, syscall.ECONNRESET) || errors.Is(err, os.ErrDeadlineExceeded) ||
-		strings.HasSuffix(err.Error(), "use of closed network connection")) {
-		err = io.EOF
+	// unwrap the Conn so that io.Copy can work in kernel space
+	if conn, ok := reflect.ValueOf(clientConn).Elem().FieldByName("Conn").Interface().(net.Conn); ok {
+		clientConn = conn
 	}
-	return
+	return dualStream(ctx, targetConn, clientConn, clientConn)
 }
 
 // Copies data target->clientReader and clientWriter->target, and flushes as needed
@@ -705,71 +676,33 @@ func (r quietReader) Read(p []byte) (n int, err error) {
 // Caddy should finish writing target -> clientReader.
 func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer) error {
 	errs, _ := errgroup.WithContext(ctx)
-	stream := func(w io.Writer, r io.Reader) error {
-		// copy bytes from r to w
-		bufPtr := bufferPool.Get().(*[]byte)
-		buf := *bufPtr
-		buf = buf[0:cap(buf)]
-		_, _err := flushingIoCopy(w, r, buf)
-		bufferPool.Put(bufPtr)
+	stream := func(w io.Writer, r io.Reader, quiet bool) (written int64, err error) {
+		written, err = io.Copy(w, r)
+		if quiet && err != nil && (errors.Is(err, syscall.ECONNRESET) ||
+			strings.HasSuffix(err.Error(), "use of closed network connection")) {
+			err = io.EOF
+		}
 
 		if cw, ok := w.(closeWriter); ok {
 			_ = cw.CloseWrite()
 		} else if closer, ok := w.(io.Closer); ok {
 			_ = closer.Close()
 		}
-		return _err
+		return
 	}
 	errs.Go(func() error {
-		return stream(target, quietReader{clientReader})
+		_, err := stream(target, clientReader, true)
+		return err
 	})
 	errs.Go(func() error {
-		return stream(clientWriter, target)
+		_, err := stream(clientWriter, target, false)
+		return err
 	})
 	return errs.Wait()
 }
 
 type closeWriter interface {
 	CloseWrite() error
-}
-
-// flushingIoCopy is analogous to buffering io.Copy(), but also attempts to flush on each iteration.
-// If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
-// Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
-func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte) (written int64, err error) {
-	flusher, ok := dst.(http.Flusher)
-	if !ok {
-		return io.CopyBuffer(dst, src, buf)
-	}
-	for {
-		nr, er := src.Read(buf)
-		if nr > 0 {
-			nw, ew := dst.Write(buf[0:nr])
-			flusher.Flush()
-			if nw < 0 || nr < nw {
-				nw = 0
-				if ew == nil {
-					ew = errors.New("invalid write result")
-				}
-			}
-			written += int64(nw)
-			if ew != nil {
-				err = ew
-				break
-			}
-			if nr != nw {
-				err = io.ErrShortWrite
-				break
-			}
-		}
-		if er != nil {
-			if er != io.EOF {
-				err = er
-			}
-			break
-		}
-	}
-	return
 }
 
 // Removes hop-by-hop headers, and writes response into ResponseWriter.
@@ -784,11 +717,7 @@ func forwardResponse(w http.ResponseWriter, response *http.Response) error {
 	}
 	removeHopByHop(w.Header())
 	w.WriteHeader(response.StatusCode)
-	bufPtr := bufferPool.Get().(*[]byte)
-	buf := *bufPtr
-	buf = buf[0:cap(buf)]
-	_, err := io.CopyBuffer(w, response.Body, buf)
-	bufferPool.Put(bufPtr)
+	_, err := io.Copy(w, response.Body)
 	return err
 }
 
@@ -822,13 +751,6 @@ function FindProxyForURL(url, host) {
 	return "HTTPS %s";
 }
 `
-
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		buffer := make([]byte, 0, 32*1024)
-		return &buffer
-	},
-}
 
 ////// used during provision only
 

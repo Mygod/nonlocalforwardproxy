@@ -160,18 +160,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	}
 	h.dialContext = func(ctx context.Context, network string, address string, bind net.Addr) (net.Conn, error) {
 		if bind == nil {
-			if h.DefaultBind != nil {
-				ip := h.DefaultBind.IP
-				ones, _ := h.DefaultBind.Mask.Size()
-				_, err := rand.Read(ip[ones>>3:])
-				if err != nil {
-					return nil, err
-				}
-				bind = &net.TCPAddr{IP: ip}
-			}
-			if bind == nil {
-				return dialer.DialContext(ctx, network, address)
-			}
+			return dialer.DialContext(ctx, network, address)
 		}
 		d := *dialer // create a shallow copy
 		d.ControlContext = freebindControlContext
@@ -530,6 +519,15 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	if h.HostOverride != nil {
 		if override, ok := h.HostOverride[strings.ToLower(host)]; ok {
 			lookupHost = override
+			if bind == nil && h.DefaultBind != nil {
+				ip := h.DefaultBind.IP
+				ones, _ := h.DefaultBind.Mask.Size()
+				_, err := rand.Read(ip[ones>>3:])
+				if err != nil {
+					return nil, err
+				}
+				bind = &net.TCPAddr{IP: ip}
+			}
 		}
 	}
 	IPs, err := net.DefaultResolver.LookupIPAddr(ctx, lookupHost)

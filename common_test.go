@@ -3,7 +3,6 @@ package forwardproxy
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -197,9 +196,6 @@ func TestMain(m *testing.M) {
 		},
 	}
 
-	buf := make([]byte, base64.StdEncoding.EncodedLen(9))
-	base64.StdEncoding.Encode(buf, []byte("test:pass"))
-
 	caddyForwardProxyAuth = caddyTestServer{
 		addr: "127.0.0.1:4891",
 		root: "./test/forwardproxy",
@@ -207,8 +203,7 @@ func TestMain(m *testing.M) {
 		proxyHandler: &Handler{
 			PACPath:         defaultPACPath,
 			ACL:             []ACLRule{{Subjects: []string{"all"}, Allow: true}},
-			AuthCredentials: [][]byte{buf},
-			AuthRequired:    true,
+			AuthCredentials: [][]byte{EncodeAuthCredentials("test", "pass")},
 		},
 	}
 
@@ -218,8 +213,7 @@ func TestMain(m *testing.M) {
 		proxyHandler: &Handler{
 			PACPath:         defaultPACPath,
 			ACL:             []ACLRule{{Subjects: []string{"all"}, Allow: true}},
-			AuthCredentials: [][]byte{buf},
-			AuthRequired:    true,
+			AuthCredentials: [][]byte{EncodeAuthCredentials("test", "pass")},
 		},
 	}
 
@@ -231,8 +225,7 @@ func TestMain(m *testing.M) {
 			PACPath:         "/superhiddenfile.pac",
 			ACL:             []ACLRule{{Subjects: []string{"all"}, Allow: true}},
 			ProbeResistance: &ProbeResistance{Domain: "test.localhost"},
-			AuthCredentials: [][]byte{buf},
-			AuthRequired:    true,
+			AuthCredentials: [][]byte{EncodeAuthCredentials("test", "pass")},
 		},
 		httpRedirPort: "8880",
 	}
@@ -260,8 +253,7 @@ func TestMain(m *testing.M) {
 		tls:  true,
 		proxyHandler: &Handler{
 			Upstream:        "https://test:pass@127.0.0.1:4891",
-			AuthCredentials: [][]byte{buf},
-			AuthRequired:    true,
+			AuthCredentials: [][]byte{EncodeAuthCredentials("upstreamtest", "upstreampass")},
 		},
 	}
 
@@ -367,6 +359,9 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+
+	// wait server ready for tls dial
+	time.Sleep(500 * time.Millisecond)
 
 	retCode := m.Run()
 

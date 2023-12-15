@@ -100,7 +100,6 @@ type Handler struct {
 	aclRules []aclRule
 
 	// TODO: temporary/deprecated - we should try to reuse existing authentication modules instead!
-	AuthRequired    bool     `json:"auth_required,omitempty"`
 	AuthCredentials [][]byte `json:"auth_credentials,omitempty"` // slice with base64-encoded credentials
 }
 
@@ -147,7 +146,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	h.aclRules = append(h.aclRules, &aclAllRule{allow: true})
 
 	if h.ProbeResistance != nil {
-		if !h.AuthRequired {
+		if h.AuthCredentials == nil {
 			return fmt.Errorf("probe resistance requires authentication")
 		}
 		if len(h.ProbeResistance.Domain) > 0 {
@@ -246,7 +245,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 
 	var authErr error
-	if h.AuthRequired {
+	if h.AuthCredentials != nil {
 		authErr = h.checkCredentials(r)
 	}
 	if h.ProbeResistance != nil && len(h.ProbeResistance.Domain) > 0 && reqHost == h.ProbeResistance.Domain {
@@ -385,7 +384,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 			r.Body, _ = r.GetBody()
 		}
-		response, _ = (&http.Transport{
+		response, err = (&http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
 			DisableKeepAlives:   true,
 			TLSHandshakeTimeout: 10 * time.Second,
@@ -421,7 +420,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 				fmt.Errorf("failed to read upstream response: %v", err))
 		}
 	}
-	err = r.Body.Close()
+	if err := r.Body.Close(); err != nil {
+		return caddyhttp.Error(http.StatusBadGateway,
+			fmt.Errorf("failed to close response body: %v", err))
+	}
 
 	if response != nil {
 		defer response.Body.Close()

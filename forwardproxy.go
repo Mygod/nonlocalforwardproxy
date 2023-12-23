@@ -688,7 +688,7 @@ func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.Respo
 		rLength.SetInt(rLength.Int() + clientRead)
 	}
 	wSize := reflect.ValueOf(w).Elem().FieldByName("size")
-	wSize = reflect.NewAt(wSize.Type(), unsafe.Pointer(wSize.UnsafeAddr())).Elem()
+	wSize = reflect.NewAt(wSize.Type(), unsafe.Pointer(wSize.UnsafeAddr())).Elem() // #nosec G103
 	if wSize.CanSet() {
 		wSize.SetInt(wSize.Int() + clientWritten)
 	}
@@ -722,8 +722,7 @@ type closeWriter interface {
 // If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
 // Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
 func flushingIoCopy(dst io.Writer, src io.Reader, quiet bool) (written int64, err error) {
-	flusher, ok := dst.(http.Flusher)
-	if ok {
+	if flusher, ok := dst.(http.Flusher); ok {
 		buf := make([]byte, 32*1024)
 		for {
 			nr, er := src.Read(buf)

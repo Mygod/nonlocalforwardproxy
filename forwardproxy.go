@@ -676,8 +676,11 @@ func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.Respo
 	}
 	defer clientConn.Close()
 	// unwrap the Conn so that io.Copy can work in kernel space
-	if conn, ok := reflect.ValueOf(clientConn).Elem().FieldByName("Conn").Interface().(net.Conn); ok {
-		clientConn = conn
+	connField := reflect.ValueOf(clientConn).Elem().FieldByName("Conn")
+	if connField.IsValid() {
+		if conn, ok := connField.Interface().(net.Conn); ok {
+			clientConn = conn
+		}
 	}
 	clientRead, clientWritten, err := dualStream(ctx, targetConn, clientConn, clientConn)
 	rLength := reflect.ValueOf(r).Elem().FieldByName("Length")
@@ -697,27 +700,13 @@ func (h *Handler) serveHijack(ctx context.Context, r io.ReadCloser, w http.Respo
 // Caddy should finish writing target -> clientReader.
 func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer) (clientRead int64, clientWritten int64, err error) {
 	errs, _ := errgroup.WithContext(ctx)
-	stream := func(w io.Writer, r io.Reader, quiet bool) (written int64, err error) {
-		written, err = io.Copy(w, r)
-		if quiet && err != nil && (errors.Is(err, syscall.ECONNRESET) ||
-			strings.HasSuffix(err.Error(), "use of closed network connection")) {
-			err = nil
-		}
-
-		if cw, ok := w.(closeWriter); ok {
-			_ = cw.CloseWrite()
-		} else if closer, ok := w.(io.Closer); ok {
-			_ = closer.Close()
-		}
-		return
-	}
 	errs.Go(func() error {
-		n, err := stream(target, clientReader, true)
+		n, err := flushingIoCopy(target, clientReader, true)
 		clientRead = n
 		return err
 	})
 	errs.Go(func() error {
-		n, err := stream(clientWriter, target, false)
+		n, err := flushingIoCopy(clientWriter, target, false)
 		clientWritten = n
 		return err
 	})
@@ -727,6 +716,52 @@ func dualStream(ctx context.Context, target net.Conn, clientReader io.ReadCloser
 
 type closeWriter interface {
 	CloseWrite() error
+}
+
+// flushingIoCopy is analogous to buffering io.Copy(), but also attempts to flush on each iteration.
+// If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
+// Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
+func flushingIoCopy(dst io.Writer, src io.Reader, quiet bool) (written int64, err error) {
+	flusher, ok := dst.(http.Flusher)
+	if ok {
+		buf := make([]byte, 32*1024)
+		for {
+			nr, er := src.Read(buf)
+			if nr > 0 {
+				nw, ew := dst.Write(buf[0:nr])
+				flusher.Flush()
+				if nw > 0 {
+					written += int64(nw)
+				}
+				if ew != nil {
+					err = ew
+					break
+				}
+				if nr != nw {
+					err = io.ErrShortWrite
+					break
+				}
+			}
+			if er != nil {
+				if er != io.EOF {
+					err = er
+				}
+				break
+			}
+		}
+	} else {
+		written, err = io.Copy(dst, src)
+		if quiet && err != nil && (errors.Is(err, syscall.ECONNRESET) ||
+			strings.HasSuffix(err.Error(), "use of closed network connection")) {
+			err = nil
+		}
+	}
+	if cw, ok := dst.(closeWriter); ok {
+		_ = cw.CloseWrite()
+	} else if closer, ok := dst.(io.Closer); ok {
+		_ = closer.Close()
+	}
+	return
 }
 
 // Removes hop-by-hop headers, and writes response into ResponseWriter.
